@@ -23,9 +23,19 @@ def unpack(value, explode=False):
 
 
 def text_limit(limit, value):
+    if not isinstance(limit, int):
+        raise TypeError("'%s' must be an integer" % limit.__class__.__name__)
     if not isinstance(value, str):
         raise TypeError("'%s' must be a string" % value.__class__.__name__)
-    if limit and limit > 0:
+
+    if limit:
+        if limit < 0:
+            warnings.warn(
+            "uri template has a negative limit '%s' for value '%s'" % (
+                limit, value
+            )
+        )
+
         return value[:limit]
     return value
 
@@ -33,16 +43,19 @@ def text_limit(limit, value):
 def value_extraction(template, *args, **kwargs):
     values = []
 
+    if not template:
+        raise ValueError("provided empty template placeholder")
+
     placeholders = template.split(",")
 
     if not args and not kwargs:
         if placeholders:
             raise ValueError("missing uri placeholder data for placeholders: '%s'" % placeholders)
-        return ("", args, kwargs)
+        return ([], args, kwargs)
 
 
     remaining_placeholders = placeholders
-    for placeholder in placeholders:
+    for index, placeholder in enumerate(placeholders):
         original = placeholder
         has_explode = placeholder[-1] == "*"
         has_limiter = ":" in placeholder
@@ -60,21 +73,21 @@ def value_extraction(template, *args, **kwargs):
             if args and args[0] is not None:
                 values.append(text_limit(amount, args[0]))
                 args = tuple(a for a in args if a != args[0])
-                remaining_placeholders.remove(original)
+                del remaining_placeholders[index]
             elif placeholder in kwargs.keys() and kwargs[placeholder] is not None:
                 values.append(text_limit(amount, kwargs[placeholder]))
                 kwargs.pop(placeholder, None)
-                remaining_placeholders.remove(original)
+                del remaining_placeholders[index]
             continue
 
         if args and args[0] is not None:
             values += unpack(args[0], explode=has_explode)
             args = tuple(a for a in args if a != args[0])
-            remaining_placeholders.remove(original)
+            del remaining_placeholders[index]
         elif placeholder in kwargs.keys() and kwargs[placeholder] is not None:
             values += unpack(kwargs[placeholder], explode=has_explode)
             kwargs.pop(placeholder, None)
-            remaining_placeholders.remove(original)
+            del remaining_placeholders[index]
         continue
 
     if placeholders:
@@ -87,8 +100,16 @@ def value_extraction(template, *args, **kwargs):
 def key_value_extraction(template, *args, **kwargs):
     values = []
 
+    if not template:
+        raise ValueError("provided empty template placeholder")
+
+
     if not args and not kwargs:
-        return ("", args, kwargs)
+        if template:
+            raise ValueError("missing uri placeholder data for placeholders: '%s'" % template)
+        return ([], args, kwargs)
+
+
 
     placeholders = template.split(",")
 
@@ -172,7 +193,7 @@ def form_style_expansion(template, *args, **kwargs):
     return ("?%s" % "&".join(values), args, kwargs)
 
 
-def form_style_continuation(template, *args, **kwargs):
+def form_style_continuation_expansion(template, *args, **kwargs):
     (values, args, kwargs) = key_value_extraction(template, *args, **kwargs)
     return ("&%s" % "&".join(values), args, kwargs)
 
@@ -187,7 +208,7 @@ prefix_types = {
     "/": path_segment_expansion,
     ";": path_parameter_expansion,
     "?": form_style_expansion,
-    "&": form_style_continuation
+    "&": form_style_continuation_expansion
 }
 
 def expand_placeholder(placeholder, *args, **kwargs):
